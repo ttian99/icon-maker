@@ -1,121 +1,164 @@
-var fs = require('fs-extra');
-var images = require('images');
-var path = require('path');
-const { glob } = require('glob');
+const fs = require('fs-extra');
+const path = require('path');
+const glob = require('glob');
+const sharp = require('sharp');
 
 /** 获取目标文件名称 */
-function getBaseName(filePath) {
+const getBaseName = (filePath) => {
     if (!filePath) return '';
-    var baseName = path.basename(filePath);
-    var extName = path.extname(filePath);
-    baseName = baseName.replace(extName, '');
-    return baseName;
-}
+    const baseName = path.basename(filePath);
+    const extName = path.extname(filePath);
+    return baseName.replace(extName, '');
+};
 
 /** 读取图片并且改变尺寸 */
-async function make(src, out, size) {
-    return new Promise((resolve, reject) => {
-        fs.ensureFileSync(out);
-        images(src).size(size, size).save(out);
-        resolve();
-    });
-}
+const resizeImg = async (src, out, size) => {
+    try {
+        await fs.ensureFile(out);
+        await sharp(src)
+            .resize(size, size)
+            .toFile(out);
+        console.log(`Successfully resized image to ${size}x${size}: ${out}`);
+    } catch (error) {
+        console.error(`Error resizing image ${src}:`, error);
+        throw error;
+    }
+};
 
 /** 安卓icon */
-async function makeAndroid(iconSrc) {
-    console.log('start makeAndroid');
-    var baseName = getBaseName(iconSrc);
-    console.log('baseName = ' + baseName);
-    if (!iconSrc) return;
+const makeAndroid = async (iconSrc) => {
+    try {
+        console.log('开始生成 Android 图标...');
+        const baseName = getBaseName(iconSrc);
+        if (!iconSrc) {
+            throw new Error('未提供图标源文件');
+        }
 
-    var outDir = path.join(__dirname, 'out', baseName);
-    fs.emptyDirSync(outDir);
+        const outDir = path.join(__dirname, 'out', baseName);
+        await fs.emptyDir(outDir);
 
-    const arr = [
-        { filePath: 'android/mipmap-hdpi/ic_launcher.png', size: 72 },
-        { filePath: 'android/mipmap-ldpi/ic_launcher.png', size: 36 },
-        { filePath: 'android/mipmap-mdpi/ic_launcher.png', size: 48 },
-        { filePath: 'android/mipmap-xhdpi/ic_launcher.png', size: 96 },
-        { filePath: 'android/mipmap-xxhdpi/ic_launcher.png', size: 144 },
-        { filePath: 'android/mipmap-xxxhdpi/ic_launcher.png', size: 192 },
-        { filePath: 'android/ic_launcher.png', size: 512 },
-    ];
+        const androidSizes = [
+            { filePath: 'android/mipmap-hdpi/ic_launcher.png', size: 72 },
+            { filePath: 'android/mipmap-ldpi/ic_launcher.png', size: 36 },
+            { filePath: 'android/mipmap-mdpi/ic_launcher.png', size: 48 },
+            { filePath: 'android/mipmap-xhdpi/ic_launcher.png', size: 96 },
+            { filePath: 'android/mipmap-xxhdpi/ic_launcher.png', size: 144 },
+            { filePath: 'android/mipmap-xxxhdpi/ic_launcher.png', size: 192 },
+            { filePath: 'android/ic_launcher.png', size: 512 },
+        ];
 
-    for (let i = 0; i < arr.length; i++) {
-        const data = arr[i];
-        var outFile = path.join(outDir, data.filePath);
-        console.log('i = ' + i + ' , outFile = ' + outFile);
-        await make(iconSrc, outFile, data.size);
+        await Promise.all(androidSizes.map(async ({ filePath, size }) => {
+            const outFile = path.join(outDir, filePath);
+            await resizeImg(iconSrc, outFile, size);
+        }));
+
+        await makeAndroidPreview(outDir);
+        console.log('Android 图标生成完成');
+    } catch (error) {
+        console.error('生成 Android 图标时出错:', error);
+        throw error;
     }
-
-    await makeAndroidPreview(outDir);
-    console.log('finish makeAndroid');
-}
+};
 
 /** android合成预览图 */
-async function makeAndroidPreview(outDir) {
-    var srcFile = path.join(__dirname, 'tpl', 'nexus5.png');
-    var outFile = path.join(outDir, 'android_preview.png');
-    var iconFile = path.join(outDir, 'android/ic_launcher.png');
-    // 图标
-    var icon = images(iconFile).resize(64);
-    fs.ensureFileSync(outFile);
-    images(srcFile).draw(icon, 50, 180).save(outFile);
-    console.log('preview-image: ' + outFile);
-}
+const makeAndroidPreview = async (outDir) => {
+    try {
+        const srcFile = path.join(__dirname, 'tpl', 'nexus5.png');
+        const outFile = path.join(outDir, 'android_preview.png');
+        const iconFile = path.join(outDir, 'android/mipmap-mdpi/ic_launcher.png');
+
+        await fs.ensureFile(outFile);
+        const icon = await sharp(iconFile).resize(64).toBuffer();
+
+        await sharp(srcFile)
+            .composite([{ input: icon, blend: 'over', top: 490, left: 140 }])
+            .toFile(outFile);
+
+        console.log('Android 预览图生成完成:', outFile);
+    } catch (error) {
+        console.error('生成 Android 预览图时出错:', error);
+        throw error;
+    }
+};
 
 /** 苹果icon */
-async function makeIos(iconSrc) {
-    console.log('start makeIos');
-    var baseName = getBaseName(iconSrc);
-    console.log('baseName = ' + baseName);
-    if (!iconSrc) return;
+const makeIos = async (iconSrc) => {
+    try {
+        console.log('开始生成 iOS 图标...');
+        const baseName = getBaseName(iconSrc);
+        if (!iconSrc) {
+            throw new Error('未提供图标源文件');
+        }
 
-    var outDir = path.join(__dirname, 'out', baseName, 'ios', 'AppIcon.appiconset');
-    fs.emptyDirSync(outDir);
-    var jsonFile = path.join(__dirname, 'tpl', 'Contents.json');
-    var cfg = fs.readJsonSync(jsonFile, { encoding: 'utf8' });
-    var arr = cfg.images;
+        const outDir = path.join(__dirname, 'out', baseName, 'ios', 'AppIcon.appiconset');
+        await fs.emptyDir(outDir);
 
-    for (let i = 0; i < arr.length; i++) {
-        const data = arr[i];
-        var outFile = path.join(outDir, data.filename);
-        const size = parseInt(data.size);
-        console.log('i = ' + i + ' , outFile = ' + outFile);
-        await make(iconSrc, outFile, size);
+        const jsonFile = path.join(__dirname, 'tpl', 'Contents.json');
+        const cfg = await fs.readJson(jsonFile, { encoding: 'utf8' });
+        const { images } = cfg;
+
+        await Promise.all(images.map(async ({ filename, size }) => {
+            const outFile = path.join(outDir, filename);
+            await resizeImg(iconSrc, outFile, parseInt(size));
+        }));
+
+        await makeIosPreview(outDir);
+        await fs.copy(
+            path.join(__dirname, 'tpl/Contents.json'),
+            path.join(outDir, 'Contents.json')
+        );
+        console.log('iOS 图标生成完成');
+    } catch (error) {
+        console.error('生成 iOS 图标时出错:', error);
+        throw error;
     }
+};
 
-    await makeIosPreview(outDir);
-    fs.copySync(path.join(__dirname, 'tpl/Contents.json'), path.join(outDir, 'Contents.json'));
-    console.log('finish makeIos');
-}
 /** ios合成预览图 */
-async function makeIosPreview(outDir) {
-    var srcFile = path.join(__dirname, 'tpl', 'iphonex.png');
-    var outFile = path.join(outDir, '../..', 'ios_preview.png');
-    var iconFile = path.join(outDir, 'icon-60@2x.png');
-    // 图标
-    var icon = images(iconFile).resize(60);
-    fs.ensureFileSync(outFile);
-    images(srcFile).draw(icon, 55, 311).save(outFile);
-    console.log('preview-image: ' + outFile);
-}
+const makeIosPreview = async (outDir) => {
+    try {
+        const srcFile = path.join(__dirname, 'tpl', 'iphone14.jpg');
+        const outFile = path.join(outDir, '../..', 'iphone_preview.png');
+        const iconFile = path.join(outDir, 'icon-60@2x.png');
 
-function main() {
-    fs.ensureDirSync(__dirname, 'out');
-    fs.ensureDirSync(__dirname, 'src');
-    glob('src/**\.?(png|jpg)', async function (err, arr) {
-        if (err) {
-            console.error(err);
+        await fs.ensureFile(outFile);
+        const icon = await sharp(iconFile).resize(68).toBuffer();
+
+        await sharp(srcFile)
+            .composite([{ input: icon, blend: 'over', top: 196, left: 51 }])
+            .toFile(outFile);
+
+        console.log('iOS 预览图生成完成:', outFile);
+    } catch (error) {
+        console.error('生成 iOS 预览图时出错:', error);
+        throw error;
+    }
+};
+
+const main = async () => {
+    try {
+        await fs.ensureDir(path.join(__dirname, 'out'));
+        await fs.ensureDir(path.join(__dirname, 'src'));
+
+        // 使用更简单的 glob 模式
+        const files = glob.sync('src/*.{png,jpg}');
+        if (!files || files.length === 0) {
+            console.warn('警告: 在 src 目录下没有找到图片文件');
             return;
         }
-        console.log(arr);
-
-        for (let i = 0; i < arr.length; i++) {
-            const file = arr[i];
+        console.log('找到以下图片文件:', files);
+        
+        for (const file of files) {
+            console.log(`\n处理文件: ${file}`);
             await makeAndroid(file);
             await makeIos(file);
         }
-    });
-}
+
+        console.log('\n所有图标生成完成！');
+    } catch (error) {
+        console.error('程序执行出错:', error);
+        process.exit(1);
+    }
+};
+
 main();
