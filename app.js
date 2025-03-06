@@ -135,6 +135,29 @@ const makeIosPreview = async (outDir) => {
     }
 };
 
+/** web合成预览图 */
+const makeWeb = async (iconSrc) => {
+    try {
+        console.log('开始生成 Web 图标...');
+        const baseName = getBaseName(iconSrc);
+        if (!iconSrc) {
+            throw new Error('未提供图标源文件');
+        }
+
+        const outDir = path.join(__dirname, 'out', baseName, 'web');
+        await fs.emptyDir(outDir);
+
+        const outFile = path.join(outDir, 'favicon.png');
+        await resizeImg(iconSrc, outFile, 48);
+
+        console.log('Web 图标生成完成:', outFile);
+    } catch (error) {
+        console.error('生成 Web 图标时出错:', error);
+        throw error;
+    }
+};
+
+
 const main = async () => {
     try {
         await fs.ensureDir(path.join(__dirname, 'out'));
@@ -152,6 +175,7 @@ const main = async () => {
             console.log(`\n处理文件: ${file}`);
             await makeAndroid(file);
             await makeIos(file);
+            await makeWeb(file);
         }
 
         console.log('\n所有图标生成完成！');
